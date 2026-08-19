@@ -34,6 +34,39 @@ That's it — `vpnproxy` raises the tunnel from `FR.conf`, listens on
 or `curl` makes to the masqueraded hostname, figures out which real
 hostname it's for and relays the connection to it through the tunnel.
 
+### Getting a WireGuard config
+
+##### Proton VPN
+
+1. Sign in at account.protonvpn.com.
+2. Downloads → WireGuard configuration.
+3. Name it something you'll recognise later — the name is only a label.
+4. Platform doesn't matter here — every choice emits the same
+   `[Interface]`/`[Peer]` file.
+5. Server: pick a specific country server yourself. Don't take
+   "Recommended" — that's chosen by load and proximity to you, which from
+   the US is never going to be Italy or the UK.
+6. Create, wait a few seconds, Download.
+
+Country selection needs a paid Proton plan; Free gives you a handful of
+countries that won't include Italy for RAI.
+
+##### NordVPN
+
+1. Sign in at my.nordaccount.com and open the NordVPN service.
+2. Find the manual/advanced setup area — NordVPN calls it something like
+   "Set up NordVPN manually", separate from the main app download. It's
+   there specifically for third-party clients.
+3. Pick WireGuard and a specific server (by country or hostname, not
+   "auto" or "recommended" — same reasoning as Proton above).
+4. Generate and download the `.conf`.
+
+NordVPN's manual-setup UI moves around more than Proton's, so treat the
+exact labels as approximate — the thing you're looking for is a WireGuard
+config generator that lets you pin a specific server, not the regular
+app's one-click connect. There's no free tier to worry about; any paid
+plan can do this.
+
 ### `run-with-hosts.sh`
 
 `run-with-hosts.sh` wraps step 2 above so you don't have to touch
