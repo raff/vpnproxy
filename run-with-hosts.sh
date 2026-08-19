@@ -77,7 +77,7 @@ trap remove_hosts_entry EXIT INT TERM
 add_hosts_entry
 
 set +e
-"$vpnproxy_bin" "$@"
+"$vpnproxy_bin" --listen $HOSTS_ENTRY_IP "$@"
 rc=$?
 set -e
 
