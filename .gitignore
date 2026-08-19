@@ -1,0 +1,6 @@
+/vpnproxy
+
+# WireGuard configs contain a private key — never commit these.
+*.conf
+
+.DS_Store

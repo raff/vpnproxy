@@ -1,0 +1,198 @@
+# vpnproxy
+
+`vpnproxy` relays local TCP connections to a service reachable through a
+WireGuard tunnel, so that a single hostname can be made to look like it's
+being accessed from wherever the tunnel's exit is — without routing
+anything else on the machine through it.
+
+It exists for testing region-gated or "internal users only" services: a
+full system VPN would make *all* your traffic look external, including
+requests to internal tools that need to see you as an internal user.
+`vpnproxy` scopes the tunnel to exactly one hostname's traffic instead.
+
+macOS only. Single static binary, no separate helper process.
+
+## Usage
+
+1. Get a WireGuard config file from your VPN provider — the same
+   `[Interface]`/`[Peer]` `.conf` you'd hand to `wg-quick`, unmodified — and
+   name it after the region it connects to, e.g. `FR.conf`.
+2. Point the service's hostname at this proxy in `/etc/hosts`:
+
+   ```
+   127.0.0.1 adobeid-na1-stg1.services.adobe.com
+   ```
+
+3. Run vpnproxy as root (raising a real WireGuard interface requires it):
+
+   ```
+   sudo vpnproxy FR
+   ```
+
+That's it — `vpnproxy` raises the tunnel from `FR.conf`, listens on
+`127.0.0.1:80` and `127.0.0.1:443`, and for every connection your browser
+or `curl` makes to the masqueraded hostname, figures out which real
+hostname it's for and relays the connection to it through the tunnel.
+
+### `run-with-hosts.sh`
+
+`run-with-hosts.sh` wraps step 2 above so you don't have to touch
+`/etc/hosts` by hand: it has the hostname hardcoded (edit the
+`HOSTS_ENTRY_HOST`/`HOSTS_ENTRY_IP` constants at the top for your own),
+adds it before running `vpnproxy`, and removes it again on exit — normal
+exit, an error, or Ctrl+C.
+
+```
+sudo ./run-with-hosts.sh FR
+```
+
+Any extra arguments are forwarded to `vpnproxy` as-is (a fallback target,
+`-ports`, etc.):
+
+```
+sudo ./run-with-hosts.sh FR 203.0.113.10
+```
+
+It only ever removes the exact line it added (tagged with a marker
+comment), so a pre-existing, unrelated `/etc/hosts` entry for the same
+host is left alone (with a warning, since whichever entry comes first in
+the file wins).
+
+### How the destination is determined
+
+You don't pass the target hostname on the command line. Per connection,
+`vpnproxy` sniffs it straight off the connection itself:
+
+- **TLS (port 443):** the SNI from the ClientHello.
+- **Plain HTTP (port 80):** the `Host:` header.
+
+Either way, that's exactly the hostname the client put on the wire — the
+`/etc/hosts` override only changed where the TCP `SYN` lands, not what the
+client actually sent — so it's also exactly the hostname you want to
+resolve and connect to. It's resolved through the WireGuard config's own
+DNS server, reached through the tunnel, not your machine's regular
+resolver (see [Why not the system resolver](#why-not-the-system-resolver)
+below).
+
+If a connection doesn't yield an SNI or a `Host` header, there's an
+optional second argument as a fallback:
+
+```
+sudo vpnproxy FR 203.0.113.10
+```
+
+`target` can be a literal IP or a hostname (resolved the same way, through
+the tunnel's DNS) — including the same masqueraded hostname `/etc/hosts`
+points at this proxy.
+
+### Flags
+
+```
+usage: vpnproxy [flags] <region> [target]
+
+  -config-dir string
+        directory containing <region>.conf (default: ./ then ~/.config/vpnproxy/wireguard/)
+  -listen string
+        local address to listen on (default "127.0.0.1")
+  -ports string
+        comma-separated list of ports to relay 1:1, local to target (default "80,443")
+```
+
+`<region>.conf` is looked up in the current directory first, then
+`~/.config/vpnproxy/wireguard/`, unless `-config-dir` is set.
+
+### Reading the logs
+
+Every connection logs its lifecycle, so you can tell whether traffic is
+actually flowing through the tunnel:
+
+```
+2026/08/18 16:53:22 raising wireguard tunnel for FR from FR.conf
+2026/08/18 16:53:23 wireguard: handshake completed with 198.51.100.7:51820 (allowed ips: [0.0.0.0/0 ::/0])
+2026/08/18 16:53:23 relaying 127.0.0.1:443 -> <sniffed SNI/Host, or "" if none> (via tunnel)
+2026/08/18 16:53:30 127.0.0.1:54321 (sniffed=adobeid-na1-stg1.services.adobe.com) -> 10.2.0.5:443: dialing through tunnel
+2026/08/18 16:53:30 127.0.0.1:54321 (sniffed=adobeid-na1-stg1.services.adobe.com) -> 10.2.0.5:443: connected through tunnel
+2026/08/18 16:53:31 127.0.0.1:54321 (sniffed=adobeid-na1-stg1.services.adobe.com) -> 10.2.0.5:443: closed after 823ms (sent 612 bytes, received 4108 bytes)
+```
+
+If the tunnel comes up but a specific server never answers, the
+"AllowedIPs" line above is the first thing worth checking — WireGuard
+silently drops packets to destinations a peer's `AllowedIPs` doesn't
+cover, which looks identical to a network timeout further down but is
+actually a config mismatch.
+
+## Implementation
+
+### Raising the tunnel
+
+`vpnproxy` brings up WireGuard on a real kernel `utun(4)` interface — the
+same primitive `wg-quick` uses on macOS (there's no in-kernel WireGuard on
+Darwin, so `wg-quick` there is also just a `utun` device plus a userspace
+`wireguard-go` process). What it deliberately *doesn't* do is what
+`wg-quick` does on top of that: install a system-wide default route or
+change DNS configuration. Instead:
+
+- The interface gets its WireGuard address(es)/MTU via `ifconfig`, plus an
+  **interface-scoped** default route (`route -ifscope`) — invisible to
+  `route get default` and to every other process, including a
+  concurrently-connected VPN.
+- Every socket `vpnproxy` opens for relayed traffic and tunnel DNS lookups
+  is explicitly pinned to that interface via `IP_BOUND_IF`/`IPV6_BOUND_IF`.
+  Combined with the scoped route, this is what actually routes traffic
+  through the tunnel — nothing else on the machine ever does.
+- After the device comes up, `vpnproxy` polls its UAPI status
+  (`last_handshake_time_sec`) until a peer handshake actually completes (or
+  times out with a clear error) before relaying or resolving anything —
+  `dev.Up()` alone only means the device is ready to *try* sending, not
+  that a peer has answered.
+
+Since the whole process runs under `sudo` anyway, there's no need to split
+privileges between a long-running unprivileged process and a separate
+helper that raises the interface: the interface is created and configured
+directly, in-process.
+
+### The relay itself
+
+Once the tunnel and a target hostname are known, relaying is a dumb TCP
+byte copy — not an HTTP or TLS proxy. There's nothing to rewrite: the
+client already sent the real hostname on the wire (SNI or `Host:`), so the
+origin sees exactly what it would without `/etc/hosts` in the picture.
+This also means TLS is never terminated or decrypted — it passes through
+end to end between the client and the real origin.
+
+### Why not the system resolver
+
+The obvious way to resolve a hostname through the tunnel would be
+`net.Resolver` with `PreferGo: true` and a custom `Dial` pointed at the
+tunnel. That doesn't work here: Go's resolver checks `/etc/hosts` *before*
+ever calling `Dial`, hosts-file hit or not. Since the whole point of this
+tool is that `/etc/hosts` already points the target hostname at
+`127.0.0.1`, that lookup would just return `127.0.0.1` again, silently,
+without a single packet going through the tunnel.
+
+Instead, DNS queries are hand-rolled (`golang.org/x/net/dns/dnsmessage`)
+and sent directly over a UDP socket bound to the tunnel interface — no
+`/etc/hosts`, no system resolver, at any point. Answers are cached by
+their DNS TTL (clamped to 5s–5min) so that sniffing the hostname off of
+every connection doesn't mean a DNS round trip through the tunnel per
+connection.
+
+### Files
+
+| File | Contents |
+| --- | --- |
+| `main.go` | CLI parsing, orchestration, shutdown |
+| `config.go` | Locates `<region>.conf` |
+| `tunnel_darwin.go` | Raises and configures the `utun` interface, brings up the WireGuard device, waits for a handshake, exposes an interface-bound dialer |
+| `target_darwin.go` | Resolves hostnames through the tunnel's own DNS server, with caching |
+| `relay.go` | The TCP listener/relay loop, plus SNI and HTTP `Host:` sniffing |
+| `run-with-hosts.sh` | Optional wrapper: manages the `/etc/hosts` entry around a `vpnproxy` run |
+
+## Building
+
+```
+go build .
+```
+
+Produces a single static `vpnproxy` binary. No separate helper process or
+install step — just run it with `sudo`.
