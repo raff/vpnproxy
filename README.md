@@ -107,7 +107,9 @@ can pull out directly:
 ```
 npx generate-nordvpn-wgconf --nordvpn-accountid <id> --outdir .
 ```
-(`<id>` is your NordVPN account ID, findable on my.nordaccount.com.) This
+(`<id>` is your NordVPN account ID, from
+https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/ — the
+same page the access-token method above starts from.) This
 generates a ready-to-use `.conf` without touching the access-token method
 above at all.
 
