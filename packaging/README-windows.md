@@ -62,12 +62,46 @@ countries.
 
 ### NordVPN
 
-1. Sign in at my.nordaccount.com and open the NordVPN service.
-2. Find the manual/advanced setup area — NordVPN calls it something like
-   "Set up NordVPN manually", separate from the main app download. It's
-   there specifically for third-party clients.
-3. Pick WireGuard and a specific server (by country or hostname, not
-   "auto" or "recommended" — same reasoning as Proton above).
-4. Generate and download the `.conf`.
+Unlike Proton, NordVPN doesn't officially hand you a downloadable
+WireGuard `.conf`. They rebranded WireGuard as "NordLynx" internally, but
+the only config export their manual-setup page (my.nordaccount.com →
+NordVPN service → "Set up NordVPN manually") gives you is OpenVPN. There's
+no first-party button that produces a `[Interface]`/`[Peer]` file — you
+have to extract your own private key and assemble one. This is an
+unofficial workaround (not documented behavior), and NordVPN can rotate
+your key and break it without notice.
 
-Any paid NordVPN plan can do this; there's no free tier to worry about.
+**Access-token method (works on any platform, no app required):**
+
+1. From the manual-setup page above, generate an access token (email
+   verification, then "Generate new token").
+2. Fetch your NordLynx private key with it (from PowerShell, or any shell
+   with `curl`):
+   ```
+   curl -s -u token:<ACCESS_TOKEN> \
+     https://api.nordvpn.com/v1/users/services/credentials | jq -r .nordlynx_private_key
+   ```
+3. Pick a WireGuard-capable server and its public key/hostname from
+   NordVPN's recommendations API (community scripts like
+   [dvcrn/generate-nordvpn-wgconf](https://github.com/dvcrn/generate-nordvpn-wgconf)
+   or [Ernestas-t/NordVPN-Wireguard-Generator](https://github.com/Ernestas-t/NordVPN-Wireguard-Generator)
+   automate this step).
+4. Assemble a normal `.conf`:
+   ```
+   [Interface]
+   PrivateKey = <nordlynx_private_key>
+   Address = 10.5.0.2/32
+
+   [Peer]
+   PublicKey = <server public key>
+   AllowedIPs = 0.0.0.0/0, ::/0
+   Endpoint = <server hostname>:51820
+   ```
+
+There's no more official documentation than this to point to; see
+https://lazyadmin.nl/home-network/nordvpn-wireguard-as-unifi-vpn-client/
+(targets Windows/PowerShell + a UniFi router specifically) and
+https://gist.github.com/bluewalk/7b3db071c488c82c604baf76a42eaad3 for
+worked examples. Any paid plan can do this — there's no free tier to worry
+about. Treat the private key like a password: it's a permanent credential
+tied to your account, not a per-session secret.
