@@ -1,4 +1,5 @@
 /vpnproxy
+/vpnproxy.exe
 
 # WireGuard configs contain a private key — never commit these.
 *.conf

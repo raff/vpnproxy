@@ -4,11 +4,9 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,18 +17,6 @@ import (
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 )
-
-// tunnel is a WireGuard connection raised on a real kernel utun(4)
-// interface — the same primitive wg-quick uses on macOS, minus the
-// system-wide default route and DNS changes wg-quick also makes. Traffic
-// only reaches it through sockets explicitly bound to ifIndex (see
-// dialerBoundTo), via an interface-scoped route, so nothing outside this
-// process's own relayed connections ever uses it.
-type tunnel struct {
-	dev        *device.Device
-	ifIndex    int
-	dnsServers []netip.Addr
-}
 
 // startTunnel parses a WireGuard .conf and brings up a kernel-level tunnel
 // for it. Must run as root: creating and configuring a utun(4) device
@@ -97,120 +83,6 @@ func startTunnel(confPath string) (*tunnel, error) {
 	return &tunnel{dev: dev, ifIndex: iface.Index, dnsServers: setting.DNS}, nil
 }
 
-// peerStatus summarizes one WireGuard peer's live state, parsed from the
-// device's own UAPI "get" output (device.IpcGet) — the only way to learn
-// whether a handshake has actually happened, or what AllowedIPs ended up
-// configured, from outside the device itself.
-type peerStatus struct {
-	endpoint      string
-	allowedIPs    []netip.Prefix
-	lastHandshake time.Time
-}
-
-func peerStatuses(dev *device.Device) ([]peerStatus, error) {
-	raw, err := dev.IpcGet()
-	if err != nil {
-		return nil, err
-	}
-	return parsePeerStatuses(raw), nil
-}
-
-// parsePeerStatuses is peerStatuses' actual parsing logic, split out so it
-// can be unit-tested against a crafted UAPI string without a live
-// *device.Device.
-func parsePeerStatuses(raw string) []peerStatus {
-	var peers []peerStatus
-	var cur *peerStatus
-	for _, line := range strings.Split(raw, "\n") {
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "public_key":
-			peers = append(peers, peerStatus{})
-			cur = &peers[len(peers)-1]
-		case "endpoint":
-			if cur != nil {
-				cur.endpoint = val
-			}
-		case "allowed_ip":
-			if cur != nil {
-				if p, err := netip.ParsePrefix(val); err == nil {
-					cur.allowedIPs = append(cur.allowedIPs, p)
-				}
-			}
-		case "last_handshake_time_sec":
-			if cur != nil {
-				if secs, err := strconv.ParseInt(val, 10, 64); err == nil && secs > 0 {
-					cur.lastHandshake = time.Unix(secs, 0)
-				}
-			}
-		}
-	}
-	return peers
-}
-
-// waitForHandshake polls the device's UAPI status until some peer reports
-// a completed handshake, or timeout elapses.
-func waitForHandshake(dev *device.Device, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		peers, err := peerStatuses(dev)
-		if err != nil {
-			return fmt.Errorf("querying wireguard device status: %w", err)
-		}
-		for _, p := range peers {
-			if !p.lastHandshake.IsZero() {
-				return nil
-			}
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("no wireguard handshake completed within %s — check that the peer's Endpoint in the .conf is reachable and that outbound UDP to it isn't blocked (e.g. by comparing against `wg-quick up` on the same .conf)", timeout)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
-// logPeerStatus reports each peer's endpoint and AllowedIPs once the
-// handshake is confirmed, and flags — as a warning, not a hard failure,
-// since the check itself could have false negatives — any DNS server from
-// the .conf that doesn't fall within any peer's AllowedIPs: WireGuard
-// silently drops outbound packets that don't match an AllowedIPs entry for
-// some peer, which looks identical to a timeout at the DNS-query layer but
-// means something completely different (a routing/config mismatch, not a
-// slow or unreachable server).
-func logPeerStatus(dev *device.Device, dnsServers []netip.Addr) {
-	peers, err := peerStatuses(dev)
-	if err != nil {
-		log.Printf("wireguard: could not query device status: %v", err)
-		return
-	}
-	for _, p := range peers {
-		log.Printf("wireguard: handshake completed with %s (allowed ips: %v)", p.endpoint, p.allowedIPs)
-		for _, dns := range dnsServers {
-			if !anyPrefixContains(p.allowedIPs, dns) {
-				log.Printf("wireguard: warning: DNS server %s is not covered by this peer's AllowedIPs — queries to it will likely be dropped silently", dns)
-			}
-		}
-	}
-}
-
-func anyPrefixContains(prefixes []netip.Prefix, addr netip.Addr) bool {
-	for _, p := range prefixes {
-		if p.Contains(addr) {
-			return true
-		}
-	}
-	return false
-}
-
-// Close tears down the tunnel; the utun interface disappears the moment its
-// fd closes, so no manual ifconfig/route cleanup is needed.
-func (t *tunnel) Close() {
-	t.dev.Close()
-}
-
 // configureInterface assigns addrs (point-to-point: /32 for IPv4, /128 for
 // IPv6, matching how every WireGuard client config hands them out) and mtu
 // to name, brings it up, and gives it an interface-scoped default route —
@@ -270,8 +142,8 @@ func addScopedDefaultRoute(name, family string) error {
 // opens to ifIndex via IP_BOUND_IF/IPV6_BOUND_IF, instead of letting the
 // kernel's normal routing table pick an interface — copied from tvview's
 // bindToInterface. This is what scopes vpnproxy's relayed connections (and
-// its tunnel-DNS lookups, see target_darwin.go) to the tunnel without
-// adding any system-wide route.
+// its tunnel-DNS lookups, see resolver.go) to the tunnel without adding any
+// system-wide route.
 func boundControl(ifIndex int) func(network, address string, c syscall.RawConn) error {
 	return func(network, address string, c syscall.RawConn) error {
 		var sockErr error

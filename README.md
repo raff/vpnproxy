@@ -158,31 +158,36 @@ actually a config mismatch.
 
 ### Raising the tunnel
 
-`vpnproxy` brings up WireGuard on a real kernel `utun(4)` interface — the
-same primitive `wg-quick` uses on macOS (there's no in-kernel WireGuard on
-Darwin, so `wg-quick` there is also just a `utun` device plus a userspace
-`wireguard-go` process). What it deliberately *doesn't* do is what
-`wg-quick` does on top of that: install a system-wide default route or
-change DNS configuration. Instead:
+`vpnproxy` brings up WireGuard on a real kernel-level virtual network
+interface — `utun(4)` on macOS (the same primitive `wg-quick` uses there;
+there's no in-kernel WireGuard on Darwin, so `wg-quick` is also just a
+`utun` device plus a userspace `wireguard-go` process), or a Wintun adapter
+on Windows (the same primitive `wireguard-windows` itself uses). What it
+deliberately *doesn't* do is what `wg-quick`/`wireguard-windows` do on top
+of that: install a system-wide default route or change DNS configuration.
+Instead:
 
-- The interface gets its WireGuard address(es)/MTU via `ifconfig`, plus an
-  **interface-scoped** default route (`route -ifscope`) — invisible to
-  `route get default` and to every other process, including a
-  concurrently-connected VPN.
+- The interface gets its WireGuard address(es)/MTU — via `ifconfig` on
+  macOS, or the IP Helper API (through `winipcfg`) on Windows — plus an
+  **interface-scoped** default route (`route -ifscope` on macOS,
+  `CreateIpForwardEntry2` against the interface's LUID on Windows).
+  Invisible to `route get default`/`route print` and to every other
+  process, including a concurrently-connected VPN.
 - Every socket `vpnproxy` opens for relayed traffic and tunnel DNS lookups
-  is explicitly pinned to that interface via `IP_BOUND_IF`/`IPV6_BOUND_IF`.
-  Combined with the scoped route, this is what actually routes traffic
-  through the tunnel — nothing else on the machine ever does.
+  is explicitly pinned to that interface — `IP_BOUND_IF`/`IPV6_BOUND_IF` on
+  macOS, `IP_UNICAST_IF`/`IPV6_UNICAST_IF` on Windows. Combined with the
+  scoped route, this is what actually routes traffic through the tunnel —
+  nothing else on the machine ever does.
 - After the device comes up, `vpnproxy` polls its UAPI status
   (`last_handshake_time_sec`) until a peer handshake actually completes (or
   times out with a clear error) before relaying or resolving anything —
   `dev.Up()` alone only means the device is ready to *try* sending, not
   that a peer has answered.
 
-Since the whole process runs under `sudo` anyway, there's no need to split
-privileges between a long-running unprivileged process and a separate
-helper that raises the interface: the interface is created and configured
-directly, in-process.
+Since the whole process runs elevated anyway (`sudo` on macOS,
+Administrator on Windows), there's no need to split privileges between a
+long-running unprivileged process and a separate helper that raises the
+interface: the interface is created and configured directly, in-process.
 
 ### The relay itself
 
@@ -216,8 +221,11 @@ connection.
 | --- | --- |
 | `main.go` | CLI parsing, orchestration, shutdown |
 | `config.go` | Locates `<region>.conf` |
-| `tunnel_darwin.go` | Raises and configures the `utun` interface, brings up the WireGuard device, waits for a handshake, exposes an interface-bound dialer |
-| `target_darwin.go` | Resolves hostnames through the tunnel's own DNS server, with caching |
+| `wireguard.go` | Cross-platform: the `tunnel` type, UAPI peer-status parsing, and handshake waiting |
+| `tunnel_darwin.go` | Raises and configures the `utun` interface, exposes an interface-bound dialer |
+| `tunnel_windows.go` | Raises and configures the Wintun adapter, exposes an interface-bound dialer |
+| `priv_darwin.go` / `priv_windows.go` | Checks for root/Administrator before raising the interface |
+| `resolver.go` | Resolves hostnames through the tunnel's own DNS server, with caching |
 | `relay.go` | The TCP listener/relay loop, plus SNI and HTTP `Host:` sniffing |
 | `run-with-hosts.sh` | Optional wrapper: manages the `/etc/hosts` entry around a `vpnproxy` run |
 
@@ -226,6 +234,29 @@ connection.
 ```
 go build .
 ```
+
+On Windows, the Wintun adapter is loaded from `wintun.dll` at runtime (via
+`golang.zx2c4.com/wireguard/tun`) — it isn't linked into the binary, and
+Windows only looks for it next to the .exe or in `System32`
+(`LOAD_LIBRARY_SEARCH_APPLICATION_DIR`), not on `PATH` or anywhere else. A
+copy of the official build (from [wintun.net](https://www.wintun.net/),
+version 0.14.1) for each architecture is vendored in this repo under
+`wintun/bin/<arch>/wintun.dll`; after `go build`, copy the one matching
+your target next to `vpnproxy.exe`:
+
+```
+GOOS=windows GOARCH=amd64 go build -o vpnproxy.exe .
+cp wintun/bin/amd64/wintun.dll .
+```
+
+`vpnproxy` also needs to run from an elevated (Administrator) prompt — see
+`priv_windows.go`.
+
+Wintun's prebuilt-binary license (`wintun/LICENSE.txt`) is not open source;
+it permits redistributing `wintun.dll` unmodified alongside software that
+only calls it through the documented API in `wintun.h` (which is exactly
+what `golang.zx2c4.com/wintun` does), but not standalone redistribution or
+reverse engineering.
 
 Produces a single static `vpnproxy` binary. No separate helper process or
 install step — just run it with `sudo`.
