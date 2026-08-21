@@ -11,18 +11,37 @@ tunnel's exit is.
    after that region, e.g. `FR.conf`. Put it in this same folder, next to
    `vpnproxy.exe` (or in `%USERPROFILE%\.config\vpnproxy\wireguard\`).
 
-2. From an **elevated** PowerShell prompt (right-click PowerShell → "Run as
-   Administrator" — raising a real WireGuard interface requires it), run:
+2. Run it — raising a real WireGuard interface requires Administrator, so
+   pick whichever of these fits how you're working:
 
-   ```
-   .\run-with-hosts.ps1 FR
-   ```
+   - **From a plain (non-elevated) `cmd` or PowerShell window** in this
+     folder — double-clicking `run-with-hosts.bat` in Explorer works too,
+     but it can't take a region argument that way, so you'd have to edit
+     the region into the file first:
 
-   This adds the masqueraded hostname to the Windows hosts file, runs
-   `vpnproxy.exe`, and removes the entry again on exit (normal exit, an
-   error, or Ctrl+C). The hostname is hardcoded in `run-with-hosts.ps1` —
-   open it in a text editor and edit the `$HostsEntryHost`/`$HostsEntryIP`
-   values near the top if you're pointing at a different service.
+     ```
+     run-with-hosts.bat FR
+     ```
+
+     It pops a UAC prompt, then opens a new elevated PowerShell window that
+     runs the script there. This also sidesteps Windows' default execution
+     policy, which otherwise blocks unsigned `.ps1` scripts from running at
+     all (double-clicking `run-with-hosts.ps1` directly just opens it in a
+     text editor instead of running it).
+
+   - **Or, from an already-elevated PowerShell prompt** (right-click
+     PowerShell → "Run as Administrator"):
+
+     ```
+     .\run-with-hosts.ps1 FR
+     ```
+
+   Either way, this adds the masqueraded hostname to the Windows hosts
+   file, runs `vpnproxy.exe`, and removes the entry again on exit (normal
+   exit, an error, or Ctrl+C). The hostname is hardcoded in
+   `run-with-hosts.ps1` — open it in a text editor and edit the
+   `$HostsEntryHost`/`$HostsEntryIP` values near the top if you're pointing
+   at a different service.
 
 3. Leave it running, and use the masqueraded hostname as normal (browser,
    `curl`, etc.) — `vpnproxy.exe` figures out which real hostname each
@@ -32,8 +51,8 @@ Any extra arguments are forwarded to `vpnproxy.exe` as-is — a fallback
 target, a different port list:
 
 ```
-.\run-with-hosts.ps1 FR 203.0.113.10
-.\run-with-hosts.ps1 FR -ports 80,443,8443
+run-with-hosts.bat FR 203.0.113.10
+run-with-hosts.bat FR -ports 80,443,8443
 ```
 
 Run `.\vpnproxy.exe -h` for the full flag list, or run it directly

@@ -63,6 +63,7 @@ jobs:
             cp "wintun/bin/${{ matrix.goarch }}/wintun.dll" "$pkg/"
             cp wintun/LICENSE.txt "$pkg/wintun-LICENSE.txt"
             cp run-with-hosts.ps1 "$pkg/"
+            cp run-with-hosts.bat "$pkg/"
             cp packaging/README-windows.md "$pkg/README.md"
             asset="$pkg.zip"
             zip -r "$asset" "$pkg"
