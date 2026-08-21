@@ -24,7 +24,7 @@ $HostsEntryHost = "adobeid-na1-stg1.services.adobe.com"
 $HostsEntryIP = "127.0.0.1"
 
 # Marks lines this script added, so cleanup only ever removes exactly
-# those — never a pre-existing entry a human put there some other way.
+# those - never a pre-existing entry a human put there some other way.
 $HostsMarker = "# vpnproxy-managed-entry"
 
 $HostsPath = Join-Path $env:SystemRoot "System32\drivers\etc\hosts"
@@ -70,11 +70,11 @@ function Add-HostsEntry {
 		$content = [System.IO.File]::ReadAllText($HostsPath)
 	}
 	if ($content -match "(?im)(?:^|\s)$([regex]::Escape($HostsEntryHost))(?:\s|$)") {
-		Write-Warning "$ScriptName`: the hosts file already has an unrelated entry for $HostsEntryHost — the one this script adds may not take effect if it resolves first"
+		Write-Warning "$ScriptName`: the hosts file already has an unrelated entry for $HostsEntryHost - the one this script adds may not take effect if it resolves first"
 	}
 
 	# Guards against appending onto the same line as the file's last entry
-	# if it happens to be missing a trailing newline — but only when
+	# if it happens to be missing a trailing newline - but only when
 	# that's actually true, so this never leaves behind a blank line of
 	# its own (which Remove-HostsEntry has no way to know is ours to clean
 	# up).
@@ -88,7 +88,7 @@ function Add-HostsEntry {
 }
 
 # try/finally alone isn't reliably run on Ctrl+C by every PowerShell
-# host/version, unlike bash's EXIT/INT/TERM trap — this CancelKeyPress
+# host/version, unlike bash's EXIT/INT/TERM trap - this CancelKeyPress
 # handler is the belt-and-braces equivalent, guarded so cleanup only ever
 # runs once regardless of which path triggers it.
 $cleanedUp = $false
