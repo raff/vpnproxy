@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # A single ubuntu-latest runner cross-compiles all four targets fine —
+    # vpnproxy has no cgo dependencies (Wintun/utun are both driven through
+    # syscalls, not C libraries), so no native macOS/Windows runners are
+    # needed just to build the binaries.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [ "$GOOS" = "windows" ]; then
+            go build -o dist/vpnproxy.exe .
+          else
+            go build -o dist/vpnproxy .
+          fi
+
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          pkg="vpnproxy-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "$pkg"
+
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            # Wintun is loaded from next to the .exe (or System32) at
+            # runtime, not from PATH — see README.md's Building section —
+            # so the matching-arch DLL has to ship in the same archive.
+            cp dist/vpnproxy.exe "$pkg/"
+            cp "wintun/bin/${{ matrix.goarch }}/wintun.dll" "$pkg/"
+            cp wintun/LICENSE.txt "$pkg/wintun-LICENSE.txt"
+            cp run-with-hosts.ps1 "$pkg/"
+            asset="$pkg.zip"
+            zip -r "$asset" "$pkg"
+          else
+            cp dist/vpnproxy "$pkg/"
+            cp run-with-hosts.sh "$pkg/"
+            asset="$pkg.tar.gz"
+            tar czf "$asset" "$pkg"
+          fi
+
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.asset }}
+          path: ${{ steps.package.outputs.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
