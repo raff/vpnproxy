@@ -10,7 +10,9 @@ full system VPN would make *all* your traffic look external, including
 requests to internal tools that need to see you as an internal user.
 `vpnproxy` scopes the tunnel to exactly one hostname's traffic instead.
 
-macOS only. Single static binary, no separate helper process.
+macOS and Windows. Single static binary, no separate helper process (on
+Windows, `wintun.dll` — see the Building section — is the one extra file
+needed alongside it).
 
 ## Usage
 
