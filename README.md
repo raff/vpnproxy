@@ -90,14 +90,26 @@ your key and break it without notice.
    Endpoint = <server hostname>:51820
    ```
 
-**macOS-specific alternative:** if you'd rather use the private key NordVPN
-already generated for your Mac, install the NordVPN app, set the protocol
-to NordLynx, connect, then run `sudo wg show nordlynx private-key` to read
-it straight off the live interface — pair it with the endpoint/public key
-from the app's connection info or the API above. If you installed via the
-Mac App Store, NordVPN also stores that same key in the macOS keychain,
+**`sudo wg show nordlynx private-key` is Linux-only** — that trick works
+there because NordVPN's Linux app really does load the kernel WireGuard
+module under an interface literally named `nordlynx`. The macOS app
+implements NordLynx through Apple's NetworkExtension framework instead (a
+sandboxed system-extension process), which never exposes the userspace
+socket `wg`/wireguard-tools talks to — so `wg show interfaces` will come
+back empty on macOS no matter what protocol/connection state the app is
+in. Don't chase this one on a Mac.
+
+**macOS-specific alternative that does work:** if you installed NordVPN via
+the Mac App Store and have connected at least once using the NordLynx
+protocol, it stores that connection's private key in the macOS keychain,
 which [dvcrn/generate-nordvpn-wgconf](https://github.com/dvcrn/generate-nordvpn-wgconf)
-can pull out directly (`npx generate-nordvpn-wgconf --nordvpn-accountid <id> --outdir .`).
+can pull out directly:
+```
+npx generate-nordvpn-wgconf --nordvpn-accountid <id> --outdir .
+```
+(`<id>` is your NordVPN account ID, findable on my.nordaccount.com.) This
+generates a ready-to-use `.conf` without touching the access-token method
+above at all.
 
 There's no more official documentation than this to point to; see
 https://lazyadmin.nl/home-network/nordvpn-wireguard-as-unifi-vpn-client/
