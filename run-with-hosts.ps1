@@ -105,7 +105,13 @@ function Invoke-CleanupOnce {
 
 Add-HostsEntry
 try {
-	& $VpnproxyBin --listen $HostsEntryIP $Region @VpnproxyArgs
+	# -config-dir is set explicitly, pointed at this script's own folder,
+	# rather than relying on vpnproxy.exe's default ("./" then
+	# ~/.config/vpnproxy/wireguard/) lookup: an elevated launch (see
+	# run-with-hosts.bat) doesn't reliably inherit this process's working
+	# directory, so vpnproxy.exe's own "./<region>.conf" check can't be
+	# trusted to land here at all.
+	& $VpnproxyBin --listen $HostsEntryIP -config-dir $ScriptDir $Region @VpnproxyArgs
 	$rc = $LASTEXITCODE
 }
 finally {
