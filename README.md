@@ -55,19 +55,58 @@ countries that won't include Italy for RAI.
 
 ##### NordVPN
 
-1. Sign in at my.nordaccount.com and open the NordVPN service.
-2. Find the manual/advanced setup area — NordVPN calls it something like
-   "Set up NordVPN manually", separate from the main app download. It's
-   there specifically for third-party clients.
-3. Pick WireGuard and a specific server (by country or hostname, not
-   "auto" or "recommended" — same reasoning as Proton above).
-4. Generate and download the `.conf`.
+Unlike Proton, NordVPN doesn't officially hand you a downloadable
+WireGuard `.conf`. They rebranded WireGuard as "NordLynx" internally, but
+the only config export their manual-setup page (my.nordaccount.com →
+NordVPN service → "Set up NordVPN manually") gives you is OpenVPN. There's
+no first-party button that produces a `[Interface]`/`[Peer]` file — you
+have to extract your own private key and assemble one. This is an
+unofficial workaround (not documented behavior), and NordVPN can rotate
+your key and break it without notice.
 
-NordVPN's manual-setup UI moves around more than Proton's, so treat the
-exact labels as approximate — the thing you're looking for is a WireGuard
-config generator that lets you pin a specific server, not the regular
-app's one-click connect. There's no free tier to worry about; any paid
-plan can do this.
+**Access-token method (works on any platform, no app required):**
+
+1. From the manual-setup page above, generate an access token (email
+   verification, then "Generate new token").
+2. Fetch your NordLynx private key with it:
+   ```
+   curl -s -u token:<ACCESS_TOKEN> \
+     https://api.nordvpn.com/v1/users/services/credentials | jq -r .nordlynx_private_key
+   ```
+3. Pick a WireGuard-capable server and its public key/hostname from
+   NordVPN's recommendations API (community scripts like
+   [dvcrn/generate-nordvpn-wgconf](https://github.com/dvcrn/generate-nordvpn-wgconf)
+   or [Ernestas-t/NordVPN-Wireguard-Generator](https://github.com/Ernestas-t/NordVPN-Wireguard-Generator)
+   automate this step).
+4. Assemble a normal `.conf`:
+   ```
+   [Interface]
+   PrivateKey = <nordlynx_private_key>
+   Address = 10.5.0.2/32
+
+   [Peer]
+   PublicKey = <server public key>
+   AllowedIPs = 0.0.0.0/0, ::/0
+   Endpoint = <server hostname>:51820
+   ```
+
+**macOS-specific alternative:** if you'd rather use the private key NordVPN
+already generated for your Mac, install the NordVPN app, set the protocol
+to NordLynx, connect, then run `sudo wg show nordlynx private-key` to read
+it straight off the live interface — pair it with the endpoint/public key
+from the app's connection info or the API above. If you installed via the
+Mac App Store, NordVPN also stores that same key in the macOS keychain,
+which [dvcrn/generate-nordvpn-wgconf](https://github.com/dvcrn/generate-nordvpn-wgconf)
+can pull out directly (`npx generate-nordvpn-wgconf --nordvpn-accountid <id> --outdir .`).
+
+There's no more official documentation than this to point to; see
+https://lazyadmin.nl/home-network/nordvpn-wireguard-as-unifi-vpn-client/
+and https://gist.github.com/bluewalk/7b3db071c488c82c604baf76a42eaad3 for
+worked examples (the former targets Windows/PowerShell + a UniFi router,
+not macOS, but the API calls are the same). Any paid plan can do this —
+there's no free tier to worry about. Treat the private key like a
+password: it's a permanent credential tied to your account, not a
+per-session secret.
 
 ### `run-with-hosts.sh`
 
