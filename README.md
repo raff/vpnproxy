@@ -51,7 +51,7 @@ hostname it's for and relays the connection to it through the tunnel.
 6. Create, wait a few seconds, Download.
 
 Country selection needs a paid Proton plan; Free gives you a handful of
-countries that won't include Italy for RAI.
+countries.
 
 ##### NordVPN
 
