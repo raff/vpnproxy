@@ -74,8 +74,8 @@ func run() error {
 		return err
 	}
 
-	if os.Geteuid() != 0 {
-		return fmt.Errorf("must run as root (raising a kernel WireGuard interface requires it); try sudo")
+	if err := requireElevated(); err != nil {
+		return err
 	}
 
 	confPath, err := findConfig(region, *configDir)
