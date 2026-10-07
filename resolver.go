@@ -233,19 +233,23 @@ type dnsAnswer struct {
 // Attempts rotate through servers, so one dead DNS server doesn't sink
 // the lookup.
 func queryDNSRetry(ctx context.Context, dialer *net.Dialer, servers []string, name string, qtype dnsmessage.Type, timeout time.Duration) ([]dnsAnswer, error) {
-	var err error
+	var errs []string
+	var last error
 	for attempt := 0; attempt < dnsAttempts && ctx.Err() == nil; attempt++ {
-		var answers []dnsAnswer
 		server := servers[attempt%len(servers)]
-		answers, err = queryDNS(ctx, dialer, server, name, qtype, timeout*time.Duration(attempt+1))
+		answers, err := queryDNS(ctx, dialer, server, name, qtype, timeout*time.Duration(attempt+1))
 		if err == nil {
 			return answers, nil
 		}
+		last = err
+		errs = append(errs, fmt.Sprintf("attempt %d: %v", attempt+1, err))
 	}
-	if err == nil {
-		err = ctx.Err()
+	if last == nil {
+		return nil, ctx.Err()
 	}
-	return nil, err
+	// Every attempt's error, not just the last: with several servers they
+	// often differ (e.g. one fails to send at once, another times out).
+	return nil, fmt.Errorf("%s: %w", strings.Join(errs, "; "), last)
 }
 
 // queryDNS sends a single raw A/AAAA query for name to server (through

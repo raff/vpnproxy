@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -166,7 +167,34 @@ func describePeers(dev *device.Device) string {
 		if !p.lastHandshake.IsZero() {
 			age = time.Since(p.lastHandshake).Round(time.Second).String() + " ago"
 		}
-		parts = append(parts, fmt.Sprintf("peer %s: last handshake %s, tx %d bytes, rx %d bytes", p.endpoint, age, p.txBytes, p.rxBytes))
+		parts = append(parts, fmt.Sprintf("peer %s (route via %s): last handshake %s, tx %d bytes, rx %d bytes", p.endpoint, routeInterface(p.endpoint), age, p.txBytes, p.rxBytes))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// routeInterface reports which local interface (and source address) the OS
+// would send packets to endpoint through, by "connecting" a UDP socket to
+// it — which only consults the routing table, sending nothing — and
+// matching the chosen source address against the machine's interfaces.
+// WireGuard's own socket is unbound, so it follows the same route: if this
+// names another VPN's interface (e.g. utun4) instead of the physical one,
+// that VPN has captured the path to the WireGuard peer.
+func routeInterface(endpoint string) string {
+	conn, err := net.Dial("udp", endpoint)
+	if err != nil {
+		return fmt.Sprintf("unknown (%v)", err)
+	}
+	defer conn.Close()
+
+	src := conn.LocalAddr().(*net.UDPAddr).IP
+	ifaces, _ := net.Interfaces()
+	for _, ifc := range ifaces {
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok && ipn.IP.Equal(src) {
+				return fmt.Sprintf("%s, src %s", ifc.Name, src)
+			}
+		}
+	}
+	return fmt.Sprintf("unknown interface, src %s", src)
 }

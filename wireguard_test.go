@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,5 +74,12 @@ func TestAnyPrefixContains(t *testing.T) {
 	}
 	if anyPrefixContains(prefixes, out) {
 		t.Errorf("8.8.8.8 should not be covered by 10.2.0.0/24")
+	}
+}
+
+func TestRouteInterfaceLoopback(t *testing.T) {
+	got := routeInterface("127.0.0.1:51820")
+	if !strings.Contains(got, "src 127.0.0.1") {
+		t.Errorf("routeInterface = %q, want it to report src 127.0.0.1", got)
 	}
 }
