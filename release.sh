@@ -18,13 +18,15 @@ git fetch -q origin main --tags
 last=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)
 last=${last:-v0.0.0}
 
-case "${1:-patch}" in
-v[0-9]*) new=$1 ;;
+bump=${1:-patch}
+
+case $bump in
+v[0-9]*) new=$bump ;;
 major|minor|patch)
 	IFS=. read -r maj min pat <<EOV
 ${last#v}
 EOV
-	case $1 in
+	case $bump in
 	major) maj=$((maj + 1)); min=0; pat=0 ;;
 	minor) min=$((min + 1)); pat=0 ;;
 	patch) pat=$((pat + 1)) ;;
