@@ -52,6 +52,10 @@ type resolver struct {
 	// uncached lookup is a round trip through the tunnel.
 	minTTL, maxTTL time.Duration
 
+	// ipv4Only skips the AAAA fallback and rejects IPv6 literals: the
+	// tunnel may not route IPv6 at all, so an IPv6 answer just fails to dial.
+	ipv4Only bool
+
 	// diag, if set, describes the tunnel's state (handshake age, byte
 	// counters); logged when a lookup fails, to tell "the tunnel is
 	// dead" apart from "the DNS server is slow".
@@ -108,6 +112,9 @@ func (r *resolver) Resolve(ctx context.Context, host string) (string, error) {
 		if ip.IsLoopback() {
 			return "", fmt.Errorf("target %q is a loopback address — did you mean the real hostname or its actual IP, not the one /etc/hosts now points at this proxy?", host)
 		}
+		if r.ipv4Only && !ip.Unmap().Is4() {
+			return "", fmt.Errorf("target %q is an IPv6 address and -ipv4-only is set", host)
+		}
 		return host, nil
 	}
 
@@ -116,6 +123,7 @@ func (r *resolver) Resolve(ctx context.Context, host string) (string, error) {
 	entry, cached := r.cache[key]
 	r.mu.Unlock()
 	if cached && time.Now().Before(entry.expiry) {
+		log.Printf("dns: %s -> %s (cached, %s left)", host, entry.ip, time.Until(entry.expiry).Round(time.Second))
 		return entry.ip, nil
 	}
 
@@ -126,6 +134,7 @@ func (r *resolver) Resolve(ctx context.Context, host string) (string, error) {
 			// failing the connection outright over one bad DNS round trip
 			// (e.g. a single dropped/retried-out packet) for a name that
 			// resolved fine moments ago.
+			log.Printf("dns: %s -> %s (expired cache entry, lookup failed: %v)", host, entry.ip, err)
 			return entry.ip, nil
 		}
 		return "", err
@@ -149,11 +158,14 @@ func (r *resolver) lookupShared(ctx context.Context, key, host string) (string, 
 
 	if !running {
 		go func() {
+			start := time.Now()
 			lctx, cancel := context.WithTimeout(context.Background(), r.budget())
 			defer cancel()
 			ip, ttl, err := r.lookup(lctx, host)
 			if err != nil && r.diag != nil {
 				log.Printf("dns: lookup of %s failed (%v); tunnel state: %s", host, err, r.diag())
+			} else if err == nil {
+				log.Printf("dns: %s -> %s (resolved through tunnel in %s, cached for %s)", host, ip, time.Since(start).Round(time.Millisecond), ttl)
 			}
 
 			r.mu.Lock()
@@ -195,7 +207,7 @@ func (r *resolver) lookup(ctx context.Context, host string) (ip string, ttl time
 	dialer := dialerBoundTo(r.ifIndex)
 
 	answers, err := queryDNSRetry(ctx, dialer, servers, host, dnsmessage.TypeA, r.timeout)
-	if err == nil && len(answers) == 0 {
+	if err == nil && len(answers) == 0 && !r.ipv4Only {
 		answers, err = queryDNSRetry(ctx, dialer, servers, host, dnsmessage.TypeAAAA, r.timeout)
 	}
 	if err != nil {

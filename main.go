@@ -50,6 +50,7 @@ func run() error {
 	dnsTimeout := flag.Duration("dns-timeout", defaultDNSTimeout, "wait for the first DNS attempt through the tunnel; retries wait 2x and 3x as long")
 	dnsMinTTL := flag.Duration("dns-min-ttl", defaultMinTTL, "cache resolved addresses at least this long, even if their DNS TTL is shorter")
 	dnsMaxTTL := flag.Duration("dns-max-ttl", defaultMaxTTL, "cache resolved addresses at most this long")
+	ipv4Only := flag.Bool("ipv4-only", false, "resolve only IPv4 (A) records and refuse IPv6 targets")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [flags] <region> [target]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "region names a <region>.conf WireGuard config. Per connection, the\n")
@@ -98,6 +99,7 @@ func run() error {
 	res.timeout = *dnsTimeout
 	res.minTTL = *dnsMinTTL
 	res.maxTTL = max(*dnsMaxTTL, *dnsMinTTL)
+	res.ipv4Only = *ipv4Only
 	res.diag = func() string { return describePeers(t.dev) }
 
 	errc := make(chan error, len(ports))
