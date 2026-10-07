@@ -65,7 +65,7 @@ func relayConn(client net.Conn, dialer *net.Dialer, res *resolver, fallbackTarge
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), res.budget())
 	target, err := res.Resolve(ctx, host)
 	cancel()
 	if err != nil {

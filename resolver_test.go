@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestQueryDNS(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	answers, err := queryDNS(ctx, &net.Dialer{}, server, "example.internal", dnsmessage.TypeA)
+	answers, err := queryDNS(ctx, &net.Dialer{}, server, "example.internal", dnsmessage.TypeA, 2*time.Second)
 	if err != nil {
 		t.Fatalf("queryDNS: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestQueryDNSIgnoresHostsFile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	answers, err := queryDNS(ctx, &net.Dialer{}, server, "localhost", dnsmessage.TypeA)
+	answers, err := queryDNS(ctx, &net.Dialer{}, server, "localhost", dnsmessage.TypeA, 2*time.Second)
 	if err != nil {
 		t.Fatalf("queryDNS: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestResolverCachesAnswer(t *testing.T) {
 
 func TestResolverRefetchesAfterTTLExpiry(t *testing.T) {
 	var queries int32
-	server := fakeDNSServer(t, "example.internal", net.IPv4(203, 0, 113, 42), 0, &queries) // TTL 0, clamped to 5s minimum by resolver.lookup
+	server := fakeDNSServer(t, "example.internal", net.IPv4(203, 0, 113, 42), 0, &queries) // TTL 0, clamped up to minTTL by resolver.lookup
 	r := testResolver(t, server)
 
 	if _, err := r.Resolve(context.Background(), "example.internal"); err != nil {
@@ -152,7 +153,7 @@ func TestResolverRefetchesAfterTTLExpiry(t *testing.T) {
 	}
 
 	// Force the cached entry to look expired without waiting out the
-	// clamped 5s minimum TTL.
+	// clamped minimum TTL.
 	r.mu.Lock()
 	r.cache["example.internal"] = cacheEntry{ip: "203.0.113.42", expiry: time.Now().Add(-time.Second)}
 	r.mu.Unlock()
@@ -190,5 +191,46 @@ func TestResolverRejectsLiteralLoopbackTarget(t *testing.T) {
 	r := newResolver(0, nil)
 	if _, err := r.Resolve(context.Background(), "127.0.0.1"); err == nil {
 		t.Fatal("Resolve should have rejected a literal loopback target")
+	}
+}
+
+func TestResolverCoalescesConcurrentLookups(t *testing.T) {
+	var queries int32
+	server := fakeDNSServer(t, "example.internal", net.IPv4(203, 0, 113, 42), 300, &queries)
+	r := testResolver(t, server)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := r.Resolve(context.Background(), "example.internal"); err != nil {
+				t.Errorf("Resolve: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if n := atomic.LoadInt32(&queries); n != 1 {
+		t.Fatalf("server saw %d queries, want 1 (concurrent lookups should share one)", n)
+	}
+}
+
+func TestResolverTimesOutWithinBudget(t *testing.T) {
+	// A UDP socket nobody reads from: queries vanish, as through a dead tunnel.
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	r := testResolver(t, conn.LocalAddr().String())
+	r.timeout = 50 * time.Millisecond
+
+	start := time.Now()
+	if _, err := r.Resolve(context.Background(), "example.internal"); err == nil {
+		t.Fatal("Resolve succeeded against a black hole")
+	}
+	if d := time.Since(start); d > r.budget()+time.Second {
+		t.Fatalf("Resolve took %s, want at most about budget %s", d, r.budget())
 	}
 }

@@ -47,6 +47,9 @@ func run() error {
 	portsFlag := flag.String("ports", "80,443", "comma-separated list of ports to relay 1:1, local to target")
 	configDir := flag.String("config-dir", "", "directory containing <region>.conf (default: ./ then ~/.config/vpnproxy/wireguard/)")
 	listenAddr := flag.String("listen", "127.0.0.1", "local address to listen on")
+	dnsTimeout := flag.Duration("dns-timeout", defaultDNSTimeout, "wait for the first DNS attempt through the tunnel; retries wait 2x and 3x as long")
+	dnsMinTTL := flag.Duration("dns-min-ttl", defaultMinTTL, "cache resolved addresses at least this long, even if their DNS TTL is shorter")
+	dnsMaxTTL := flag.Duration("dns-max-ttl", defaultMaxTTL, "cache resolved addresses at most this long")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [flags] <region> [target]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "region names a <region>.conf WireGuard config. Per connection, the\n")
@@ -92,6 +95,10 @@ func run() error {
 
 	dialer := dialerBoundTo(t.ifIndex)
 	res := newResolver(t.ifIndex, t.dnsServers)
+	res.timeout = *dnsTimeout
+	res.minTTL = *dnsMinTTL
+	res.maxTTL = max(*dnsMaxTTL, *dnsMinTTL)
+	res.diag = func() string { return describePeers(t.dev) }
 
 	errc := make(chan error, len(ports))
 	for _, port := range ports {

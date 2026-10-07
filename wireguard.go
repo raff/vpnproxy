@@ -40,6 +40,8 @@ type peerStatus struct {
 	endpoint      string
 	allowedIPs    []netip.Prefix
 	lastHandshake time.Time
+	txBytes       uint64
+	rxBytes       uint64
 }
 
 func peerStatuses(dev *device.Device) ([]peerStatus, error) {
@@ -74,6 +76,14 @@ func parsePeerStatuses(raw string) []peerStatus {
 				if p, err := netip.ParsePrefix(val); err == nil {
 					cur.allowedIPs = append(cur.allowedIPs, p)
 				}
+			}
+		case "tx_bytes":
+			if cur != nil {
+				cur.txBytes, _ = strconv.ParseUint(val, 10, 64)
+			}
+		case "rx_bytes":
+			if cur != nil {
+				cur.rxBytes, _ = strconv.ParseUint(val, 10, 64)
 			}
 		case "last_handshake_time_sec":
 			if cur != nil {
@@ -138,4 +148,25 @@ func anyPrefixContains(prefixes []netip.Prefix, addr netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+// describePeers summarizes each peer's handshake age and tx/rx counters,
+// for the "why did this DNS query time out" diagnostic: a stale or missing
+// handshake means the tunnel itself (its endpoint path, typically) is
+// broken; fresh handshake with tx growing but rx flat between two
+// timeouts means packets leave but nothing comes back.
+func describePeers(dev *device.Device) string {
+	peers, err := peerStatuses(dev)
+	if err != nil {
+		return fmt.Sprintf("peer status unavailable: %v", err)
+	}
+	var parts []string
+	for _, p := range peers {
+		age := "never"
+		if !p.lastHandshake.IsZero() {
+			age = time.Since(p.lastHandshake).Round(time.Second).String() + " ago"
+		}
+		parts = append(parts, fmt.Sprintf("peer %s: last handshake %s, tx %d bytes, rx %d bytes", p.endpoint, age, p.txBytes, p.rxBytes))
+	}
+	return strings.Join(parts, "; ")
 }

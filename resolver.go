@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"strings"
@@ -38,8 +39,27 @@ type resolver struct {
 	// server needs an arbitrary, unprivileged one.
 	port string
 
-	mu    sync.Mutex
-	cache map[string]cacheEntry
+	// timeout is the wait for the first attempt's response; later
+	// attempts wait 2x and 3x as long (see queryDNSRetry), so a slow
+	// first handshake over a congested path still gets a chance to
+	// complete. The whole lookup (A and AAAA together) is bounded by
+	// budget().
+	timeout time.Duration
+
+	// Cached answers live for their DNS TTL, clamped to [minTTL, maxTTL].
+	// The target of this proxy is a handful of hostnames whose addresses
+	// rarely change, so the floor is deliberately generous: every
+	// uncached lookup is a round trip through the tunnel.
+	minTTL, maxTTL time.Duration
+
+	// diag, if set, describes the tunnel's state (handshake age, byte
+	// counters); logged when a lookup fails, to tell "the tunnel is
+	// dead" apart from "the DNS server is slow".
+	diag func() string
+
+	mu       sync.Mutex
+	cache    map[string]cacheEntry
+	inflight map[string]*lookupCall
 }
 
 type cacheEntry struct {
@@ -47,8 +67,39 @@ type cacheEntry struct {
 	expiry time.Time
 }
 
+// lookupCall is one in-progress lookup that concurrent Resolve calls for
+// the same name wait on instead of each sending their own queries.
+type lookupCall struct {
+	done chan struct{}
+	ip   string
+	err  error
+}
+
+const (
+	defaultDNSTimeout = 2 * time.Second
+	defaultMinTTL     = 5 * time.Minute
+	defaultMaxTTL     = time.Hour
+	dnsAttempts       = 3
+)
+
 func newResolver(ifIndex int, dnsServers []netip.Addr) *resolver {
-	return &resolver{ifIndex: ifIndex, dnsServers: dnsServers, port: "53", cache: map[string]cacheEntry{}}
+	return &resolver{
+		ifIndex:    ifIndex,
+		dnsServers: dnsServers,
+		port:       "53",
+		timeout:    defaultDNSTimeout,
+		minTTL:     defaultMinTTL,
+		maxTTL:     defaultMaxTTL,
+		cache:      map[string]cacheEntry{},
+		inflight:   map[string]*lookupCall{},
+	}
+}
+
+// budget is the most time one Resolve can spend on the network: all
+// attempts (timeout, 2x, 3x) of the A query and, if needed, the AAAA one
+// share it.
+func (r *resolver) budget() time.Duration {
+	return r.timeout * dnsAttempts * (dnsAttempts + 1) / 2
 }
 
 // Resolve returns the bare IP to dial for host, which may already be one.
@@ -68,7 +119,7 @@ func (r *resolver) Resolve(ctx context.Context, host string) (string, error) {
 		return entry.ip, nil
 	}
 
-	resolved, ttl, err := r.lookup(ctx, host)
+	resolved, err := r.lookupShared(ctx, key, host)
 	if err != nil {
 		if cached {
 			// A cached-but-expired answer is still a better bet than
@@ -79,11 +130,50 @@ func (r *resolver) Resolve(ctx context.Context, host string) (string, error) {
 		}
 		return "", err
 	}
-
-	r.mu.Lock()
-	r.cache[key] = cacheEntry{ip: resolved, expiry: time.Now().Add(ttl)}
-	r.mu.Unlock()
 	return resolved, nil
+}
+
+// lookupShared runs lookup for host, making concurrent callers for the
+// same name (a browser opening a handful of connections at once) share a
+// single set of queries. The lookup runs detached from any one caller's
+// ctx, bounded by budget(), so one caller giving up doesn't fail the
+// others, and still fills the cache for whoever comes next.
+func (r *resolver) lookupShared(ctx context.Context, key, host string) (string, error) {
+	r.mu.Lock()
+	call, running := r.inflight[key]
+	if !running {
+		call = &lookupCall{done: make(chan struct{})}
+		r.inflight[key] = call
+	}
+	r.mu.Unlock()
+
+	if !running {
+		go func() {
+			lctx, cancel := context.WithTimeout(context.Background(), r.budget())
+			defer cancel()
+			ip, ttl, err := r.lookup(lctx, host)
+			if err != nil && r.diag != nil {
+				log.Printf("dns: lookup of %s failed (%v); tunnel state: %s", host, err, r.diag())
+			}
+
+			r.mu.Lock()
+			if err == nil {
+				r.cache[key] = cacheEntry{ip: ip, expiry: time.Now().Add(ttl)}
+			}
+			delete(r.inflight, key)
+			r.mu.Unlock()
+
+			call.ip, call.err = ip, err
+			close(call.done)
+		}()
+	}
+
+	select {
+	case <-call.done:
+		return call.ip, call.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 // lookup does the actual tunnel-DNS round trip for host: A first, then
@@ -98,18 +188,21 @@ func (r *resolver) lookup(ctx context.Context, host string) (ip string, ttl time
 		return "", 0, fmt.Errorf("%q is not an IP address, and the wireguard config has no DNS server to resolve it through", host)
 	}
 
-	server := net.JoinHostPort(r.dnsServers[0].String(), r.port)
+	var servers []string
+	for _, a := range r.dnsServers {
+		servers = append(servers, net.JoinHostPort(a.String(), r.port))
+	}
 	dialer := dialerBoundTo(r.ifIndex)
 
-	answers, err := queryDNSRetry(ctx, dialer, server, host, dnsmessage.TypeA)
+	answers, err := queryDNSRetry(ctx, dialer, servers, host, dnsmessage.TypeA, r.timeout)
 	if err == nil && len(answers) == 0 {
-		answers, err = queryDNSRetry(ctx, dialer, server, host, dnsmessage.TypeAAAA)
+		answers, err = queryDNSRetry(ctx, dialer, servers, host, dnsmessage.TypeAAAA, r.timeout)
 	}
 	if err != nil {
-		return "", 0, fmt.Errorf("resolving %s through the tunnel's DNS (%s): %w", host, r.dnsServers[0], err)
+		return "", 0, fmt.Errorf("resolving %s through the tunnel's DNS (%v): %w", host, r.dnsServers, err)
 	}
 	if len(answers) == 0 {
-		return "", 0, fmt.Errorf("%s has no A or AAAA record via the tunnel's DNS (%s)", host, r.dnsServers[0])
+		return "", 0, fmt.Errorf("%s has no A or AAAA record via the tunnel's DNS (%v)", host, r.dnsServers)
 	}
 
 	a := answers[0]
@@ -118,16 +211,9 @@ func (r *resolver) lookup(ctx context.Context, host string) (ip string, ttl time
 	}
 
 	// Clamped so a very long TTL doesn't pin a stale answer indefinitely,
-	// and a 0 or near-0 one (some servers use this to mean "don't cache")
-	// doesn't turn into a tight per-connection DNS-query loop.
-	switch {
-	case a.ttl < 5*time.Second:
-		ttl = 5 * time.Second
-	case a.ttl > 5*time.Minute:
-		ttl = 5 * time.Minute
-	default:
-		ttl = a.ttl
-	}
+	// and a short or zero one (some servers use this to mean "don't
+	// cache") doesn't turn into a per-connection DNS-query loop.
+	ttl = min(max(a.ttl, r.minTTL), r.maxTTL)
 	return a.ip.String(), ttl, nil
 }
 
@@ -137,20 +223,27 @@ type dnsAnswer struct {
 	ttl time.Duration
 }
 
-// queryDNSRetry calls queryDNS up to 3 times: UDP is lossy, and a single
-// dropped packet (query or response) shouldn't be reported as "no such
-// record" or, worse, misread as a tunnel/handshake problem — startTunnel
-// already confirms the handshake itself before any lookup runs, so a
-// timeout here specifically means the query or its response, not the
-// tunnel, went missing.
-func queryDNSRetry(ctx context.Context, dialer *net.Dialer, server, name string, qtype dnsmessage.Type) ([]dnsAnswer, error) {
+// queryDNSRetry calls queryDNS up to dnsAttempts times: UDP is lossy, and
+// a single dropped packet (query or response) shouldn't be reported as "no
+// such record" or, worse, misread as a tunnel/handshake problem —
+// startTunnel already confirms the handshake itself before any lookup
+// runs, so a timeout here specifically means the query or its response,
+// not the tunnel, went missing (or the tunnel is re-handshaking, which
+// WireGuard retries every 5s: hence the growing per-attempt timeout).
+// Attempts rotate through servers, so one dead DNS server doesn't sink
+// the lookup.
+func queryDNSRetry(ctx context.Context, dialer *net.Dialer, servers []string, name string, qtype dnsmessage.Type, timeout time.Duration) ([]dnsAnswer, error) {
 	var err error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < dnsAttempts && ctx.Err() == nil; attempt++ {
 		var answers []dnsAnswer
-		answers, err = queryDNS(ctx, dialer, server, name, qtype)
+		server := servers[attempt%len(servers)]
+		answers, err = queryDNS(ctx, dialer, server, name, qtype, timeout*time.Duration(attempt+1))
 		if err == nil {
 			return answers, nil
 		}
+	}
+	if err == nil {
+		err = ctx.Err()
 	}
 	return nil, err
 }
@@ -163,7 +256,7 @@ func queryDNSRetry(ctx context.Context, dialer *net.Dialer, server, name string,
 // query like this gets back, so there's no need for the usual
 // truncated-response-retry-over-TCP dance a general-purpose resolver would
 // do.
-func queryDNS(ctx context.Context, dialer *net.Dialer, server, name string, qtype dnsmessage.Type) ([]dnsAnswer, error) {
+func queryDNS(ctx context.Context, dialer *net.Dialer, server, name string, qtype dnsmessage.Type, timeout time.Duration) ([]dnsAnswer, error) {
 	qname, err := dnsmessage.NewName(name + ".")
 	if err != nil {
 		return nil, fmt.Errorf("invalid hostname %q: %w", name, err)
@@ -191,7 +284,11 @@ func queryDNS(ctx context.Context, dialer *net.Dialer, server, name string, qtyp
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	deadline := time.Now().Add(timeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	conn.SetDeadline(deadline)
 	if _, err := conn.Write(packed); err != nil {
 		return nil, fmt.Errorf("sending dns query to %s: %w", server, err)
 	}
