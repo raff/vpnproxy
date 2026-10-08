@@ -56,7 +56,16 @@ func startTunnel(confPath string) (*tunnel, error) {
 		return nil, fmt.Errorf("looking up %s: %w", name, err)
 	}
 
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), device.NewLogger(device.LogLevelError, ""))
+	bind := conn.NewDefaultBind()
+	if bindIface != "" {
+		pi, err := net.InterfaceByName(bindIface)
+		if err != nil {
+			tunDev.Close()
+			return nil, fmt.Errorf("-bind-iface: %w", err)
+		}
+		bind = &ifaceBind{ifIndex: pi.Index}
+	}
+	dev := device.NewDevice(tunDev, bind, device.NewLogger(device.LogLevelError, ""))
 	if err := dev.IpcSet(setting.IpcRequest); err != nil {
 		dev.Close()
 		return nil, fmt.Errorf("configuring wireguard device: %w", err)

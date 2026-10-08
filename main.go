@@ -36,6 +36,9 @@ import (
 	"syscall"
 )
 
+// bindIface is -bind-iface; read by startTunnel (tunnel_darwin.go).
+var bindIface string
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "vpnproxy:", err)
@@ -51,6 +54,7 @@ func run() error {
 	dnsMinTTL := flag.Duration("dns-min-ttl", defaultMinTTL, "cache resolved addresses at least this long, even if their DNS TTL is shorter")
 	dnsMaxTTL := flag.Duration("dns-max-ttl", defaultMaxTTL, "cache resolved addresses at most this long")
 	ipv4Only := flag.Bool("ipv4-only", false, "resolve only IPv4 (A) records and refuse IPv6 targets")
+	flag.StringVar(&bindIface, "bind-iface", "", "macOS only: send WireGuard's UDP out of this interface (e.g. en0) instead of the default route, bypassing a full-tunnel VPN like GlobalProtect")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [flags] <region> [target]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "region names a <region>.conf WireGuard config. Per connection, the\n")
