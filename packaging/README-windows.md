@@ -81,14 +81,30 @@ countries.
 
 ### NordVPN
 
-Unlike Proton, NordVPN doesn't officially hand you a downloadable
-WireGuard `.conf`. They rebranded WireGuard as "NordLynx" internally, but
-the only config export their manual-setup page (my.nordaccount.com →
-NordVPN service → "Set up NordVPN manually") gives you is OpenVPN. There's
-no first-party button that produces a `[Interface]`/`[Peer]` file — you
-have to extract your own private key and assemble one. This is an
-unofficial workaround (not documented behavior), and NordVPN can rotate
-your key and break it without notice.
+**Recommended: download a WireGuard config from Nord Account.**
+
+As of October 2026, NordVPN's Manual setup page offers a downloadable
+WireGuard `.conf` that works with `vpnproxy` as-is; no key extraction or
+manual configuration editing is needed.
+
+1. Sign in at [Nord Account](https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/)
+   and open NordVPN → Manual setup.
+2. On the **Server recommendation** tab, select the country you want.
+3. Choose a server with the **Verified** badge (NordVPN is retiring older
+   servers), then click the **Wireguard** link under Available protocols
+   to download its WireGuard configuration.
+4. Rename the downloaded file for your region, e.g. `BR.conf`, and put it
+   in the folder you run `vpnproxy.exe` from or
+   `%USERPROFILE%\.config\vpnproxy\wireguard\`. Keep its contents unchanged.
+
+Treat the downloaded file like a password: it contains your private key.
+
+**Fallback: extract a NordLynx key and assemble a config.**
+
+Keep the method below as an alternative if NordVPN removes the WireGuard
+download option again. NordLynx is NordVPN's WireGuard-based protocol;
+this key-extraction method is an unofficial workaround, and NordVPN can
+rotate your key or change its behavior without notice.
 
 **Access-token method (works on any platform, no app required):**
 
@@ -117,10 +133,10 @@ your key and break it without notice.
    Endpoint = <server hostname>:51820
    ```
 
-There's no more official documentation than this to point to; see
+For worked examples of this fallback method, see
 https://lazyadmin.nl/home-network/nordvpn-wireguard-as-unifi-vpn-client/
 (targets Windows/PowerShell + a UniFi router specifically) and
-https://gist.github.com/bluewalk/7b3db071c488c82c604baf76a42eaad3 for
-worked examples. Any paid plan can do this — there's no free tier to worry
+https://gist.github.com/bluewalk/7b3db071c488c82c604baf76a42eaad3.
+Any paid plan can do this — there's no free tier to worry
 about. Treat the private key like a password: it's a permanent credential
 tied to your account, not a per-session secret.
