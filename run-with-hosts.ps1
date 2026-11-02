@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
 Wraps vpnproxy.exe so the caller doesn't have to manage the Windows hosts
-file by hand: adds the masqueraded hostname below, runs vpnproxy.exe, and
-always removes the entry again on exit (normal exit, error, or Ctrl+C).
+file by hand: adds the masqueraded hostnames below, runs vpnproxy.exe, and
+always removes the entries again on exit (normal exit, error, or Ctrl+C).
 
 .EXAMPLE
 # From an elevated (Administrator) PowerShell prompt:
@@ -18,9 +18,12 @@ param(
 $ScriptName = Split-Path -Leaf $PSCommandPath
 $ScriptDir = Split-Path -Parent $PSCommandPath
 
-# Hardcoded on purpose: edit this to point at whatever service you're
+# Hardcoded on purpose: edit this list to point at whatever services you're
 # masquerading, so the caller never has to touch the hosts file themselves.
-$HostsEntryHost = "adobeid-na1-stg1.services.adobe.com"
+$HostsEntryHosts = @(
+	"adobeid-na1-stg1.services.adobe.com"
+	"geo-dc.adobe.com"
+)
 $HostsEntryIP = "127.0.0.1"
 
 # Marks lines this script added, so cleanup only ever removes exactly
@@ -59,7 +62,7 @@ function Remove-HostsEntry {
 	}
 	$kept = $lines | Where-Object { $_ -notmatch [regex]::Escape($HostsMarker) }
 	[System.IO.File]::WriteAllLines($HostsPath, $kept, [System.Text.Encoding]::ASCII)
-	Write-Host "$ScriptName`: removed $HostsEntryHost from the hosts file"
+	Write-Host "$ScriptName`: removed managed host entries from the hosts file"
 }
 
 function Add-HostsEntry {
@@ -69,8 +72,10 @@ function Add-HostsEntry {
 		Remove-HostsEntry
 		$content = [System.IO.File]::ReadAllText($HostsPath)
 	}
-	if ($content -match "(?im)(?:^|\s)$([regex]::Escape($HostsEntryHost))(?:\s|$)") {
-		Write-Warning "$ScriptName`: the hosts file already has an unrelated entry for $HostsEntryHost - the one this script adds may not take effect if it resolves first"
+	foreach ($hostname in $HostsEntryHosts) {
+		if ($content -match "(?im)(?:^|\s)$([regex]::Escape($hostname))(?:\s|$)") {
+			Write-Warning "$ScriptName`: the hosts file already has an unrelated entry for $hostname - the one this script adds may not take effect if it resolves first"
+		}
 	}
 
 	# Guards against appending onto the same line as the file's last entry
@@ -82,9 +87,12 @@ function Add-HostsEntry {
 	if ($content.Length -gt 0 -and -not $content.EndsWith("`n")) {
 		$prefix = "`r`n"
 	}
-	$entry = "$prefix$HostsEntryIP`t$HostsEntryHost`t$HostsMarker`r`n"
-	[System.IO.File]::AppendAllText($HostsPath, $entry, [System.Text.Encoding]::ASCII)
-	Write-Host "$ScriptName`: added $HostsEntryHost -> $HostsEntryIP to the hosts file"
+	foreach ($hostname in $HostsEntryHosts) {
+		$entry = "$prefix$HostsEntryIP`t$hostname`t$HostsMarker`r`n"
+		[System.IO.File]::AppendAllText($HostsPath, $entry, [System.Text.Encoding]::ASCII)
+		$prefix = ""
+		Write-Host "$ScriptName`: added $hostname -> $HostsEntryIP to the hosts file"
+	}
 }
 
 # try/finally alone isn't reliably run on Ctrl+C by every PowerShell

@@ -1,14 +1,14 @@
 # vpnproxy
 
-`vpnproxy` relays local TCP connections to a service reachable through a
-WireGuard tunnel, so that a single hostname can be made to look like it's
+`vpnproxy` relays local TCP connections to services reachable through a
+WireGuard tunnel, so that selected hostnames can be made to look like they're
 being accessed from wherever the tunnel's exit is — without routing
 anything else on the machine through it.
 
 It exists for testing region-gated or "internal users only" services: a
 full system VPN would make *all* your traffic look external, including
 requests to internal tools that need to see you as an internal user.
-`vpnproxy` scopes the tunnel to exactly one hostname's traffic instead.
+`vpnproxy` scopes the tunnel to the selected hostnames' traffic instead.
 
 macOS and Windows. Single static binary, no separate helper process (on
 Windows, `wintun.dll` — see the Building section — is the one extra file
@@ -19,10 +19,11 @@ needed alongside it).
 1. Get a WireGuard config file from your VPN provider — the same
    `[Interface]`/`[Peer]` `.conf` you'd hand to `wg-quick`, unmodified — and
    name it after the region it connects to, e.g. `FR.conf`.
-2. Point the service's hostname at this proxy in `/etc/hosts`:
+2. Point each service's hostname at this proxy in `/etc/hosts`:
 
    ```
    127.0.0.1 adobeid-na1-stg1.services.adobe.com
+   127.0.0.1 geo-dc.adobe.com
    ```
 
 3. Run vpnproxy as root (raising a real WireGuard interface requires it):
@@ -141,10 +142,33 @@ per-session secret.
 ### `run-with-hosts.sh`
 
 `run-with-hosts.sh` wraps step 2 above so you don't have to touch
-`/etc/hosts` by hand: it has the hostname hardcoded (edit the
-`HOSTS_ENTRY_HOST`/`HOSTS_ENTRY_IP` constants at the top for your own),
-adds it before running `vpnproxy`, and removes it again on exit — normal
+`/etc/hosts` by hand: edit the `HOSTS_ENTRY_HOSTS` array at the top to list
+your hostnames (and `HOSTS_ENTRY_IP` if needed). It adds every hostname
+before running `vpnproxy` and removes the entries again on exit — normal
 exit, an error, or Ctrl+C.
+
+```bash
+readonly HOSTS_ENTRY_HOSTS=(
+    "adobeid-na1-stg1.services.adobe.com"
+    "geo-dc.adobe.com"
+)
+```
+
+On Windows, edit the corresponding `$HostsEntryHosts` array in
+`run-with-hosts.ps1`, then run it from an elevated PowerShell prompt or
+use `run-with-hosts.bat`:
+
+```powershell
+$HostsEntryHosts = @(
+    "adobeid-na1-stg1.services.adobe.com"
+    "geo-dc.adobe.com"
+)
+```
+
+All listed hosts share one WireGuard tunnel and the same listening ports.
+The relay chooses the destination independently for each connection using
+TLS SNI or HTTP `Host`; a connection with neither still uses the single
+optional fallback target.
 
 ```
 sudo ./run-with-hosts.sh FR
@@ -157,7 +181,7 @@ Any extra arguments are forwarded to `vpnproxy` as-is (a fallback target,
 sudo ./run-with-hosts.sh FR 203.0.113.10
 ```
 
-It only ever removes the exact line it added (tagged with a marker
+It only ever removes the managed lines it added (tagged with a marker
 comment), so a pre-existing, unrelated `/etc/hosts` entry for the same
 host is left alone (with a warning, since whichever entry comes first in
 the file wins).
