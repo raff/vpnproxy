@@ -47,6 +47,10 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "fetch" {
+		return runFetch(os.Args[2:])
+	}
+
 	portsFlag := flag.String("ports", "80,443", "comma-separated list of ports to relay 1:1, local to target")
 	configDir := flag.String("config-dir", "", "directory containing <region>.conf (default: ./ then ~/.config/vpnproxy/wireguard/)")
 	listenAddr := flag.String("listen", "127.0.0.1", "local address to listen on")
@@ -56,7 +60,8 @@ func run() error {
 	ipv4Only := flag.Bool("ipv4-only", false, "resolve only IPv4 (A) records and refuse IPv6 targets")
 	flag.StringVar(&bindIface, "bind-iface", "", "macOS only: send WireGuard's UDP out of this interface (e.g. en0) instead of the default route, bypassing a full-tunnel VPN like GlobalProtect")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s [flags] <region> [target]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s [flags] <region> [target]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "       %s fetch [flags] <kv-path>   (download configs from Vault; see fetch -h)\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "region names a <region>.conf WireGuard config. Per connection, the\n")
 		fmt.Fprintf(os.Stderr, "destination hostname is sniffed from SNI (TLS) or the Host header\n")
 		fmt.Fprintf(os.Stderr, "(plain HTTP) and resolved through the tunnel's own DNS. target is only\n")

@@ -139,6 +139,35 @@ there's no free tier to worry about. Treat the private key like a
 password: it's a permanent credential tied to your account, not a
 per-session secret.
 
+##### Sharing configs through HashiCorp Vault
+
+Store all regions as fields of a single KV secret, one field per region
+holding the `.conf` text:
+
+```
+vault kv put <mount>/vpnproxy FR=@FR.conf BR=@BR.conf
+```
+
+Then anyone with read access can download them all at once (no `sudo`
+needed):
+
+```
+export VAULT_ADDR=https://vault.example.com
+vpnproxy fetch <mount>/vpnproxy
+```
+
+This writes `<region>.conf` (mode 0600) for every field into
+`~/.config/vpnproxy/wireguard/` (override with `-dir`), replacing existing
+files. A stale `./<region>.conf` in the current directory still takes
+precedence when running `vpnproxy`. KV v1 and v2 mounts both work.
+
+Authentication reuses `$VAULT_TOKEN` or the `~/.vault-token` saved by
+`vault login`. If neither works, it runs the same browser-based OIDC login
+as `vault login -method=oidc`: it opens the browser, waits for the
+callback on `http://localhost:8250/oidc/callback`, then saves the new
+token to `~/.vault-token`. Use `-oidc-mount`, `-oidc-role`, `-oidc-port`,
+and `-namespace` (or `$VAULT_NAMESPACE`) if your setup needs them.
+
 ### `run-with-hosts.sh`
 
 `run-with-hosts.sh` wraps step 2 above so you don't have to touch
@@ -217,6 +246,7 @@ points at this proxy.
 
 ```
 usage: vpnproxy [flags] <region> [target]
+       vpnproxy fetch [flags] <kv-path>   (download configs from Vault; see fetch -h)
 
   -config-dir string
         directory containing <region>.conf (default: ./ then ~/.config/vpnproxy/wireguard/)
@@ -316,6 +346,7 @@ connection.
 | --- | --- |
 | `main.go` | CLI parsing, orchestration, shutdown |
 | `config.go` | Locates `<region>.conf` |
+| `vault.go` | `vpnproxy fetch`: downloads `<region>.conf` files from a Vault KV secret, with browser OIDC login |
 | `wireguard.go` | Cross-platform: the `tunnel` type, UAPI peer-status parsing, and handshake waiting |
 | `tunnel_darwin.go` | Raises and configures the `utun` interface, exposes an interface-bound dialer |
 | `tunnel_windows.go` | Raises and configures the Wintun adapter, exposes an interface-bound dialer |
