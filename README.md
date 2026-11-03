@@ -39,6 +39,17 @@ hostname it's for and relays the connection to it through the tunnel.
 
 ### Getting a WireGuard config
 
+List available regions without starting a tunnel or requiring elevation:
+
+```
+vpnproxy list
+vpnproxy list -config-dir /path/to/configs
+```
+
+This prints sorted region names (without `.conf`), checking the current
+directory and the [default config directory](#flags). Duplicate names appear
+only once. With `-config-dir`, only that directory is checked.
+
 ##### Proton VPN
 
 1. Sign in at account.protonvpn.com.

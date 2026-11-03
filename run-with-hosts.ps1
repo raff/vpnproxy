@@ -32,11 +32,6 @@ $HostsMarker = "# vpnproxy-managed-entry"
 
 $HostsPath = Join-Path $env:SystemRoot "System32\drivers\etc\hosts"
 
-if (-not $Region) {
-	Write-Error "usage: $ScriptName <region> [vpnproxy args...]  (run from an elevated prompt)"
-	exit 1
-}
-
 $VpnproxyBin = Join-Path $ScriptDir "vpnproxy.exe"
 if (-not (Test-Path -LiteralPath $VpnproxyBin -PathType Leaf)) {
 	$found = Get-Command "vpnproxy.exe" -ErrorAction SilentlyContinue
@@ -47,6 +42,13 @@ if (-not (Test-Path -LiteralPath $VpnproxyBin -PathType Leaf)) {
 		Write-Error "$ScriptName`: vpnproxy.exe not found next to this script or on PATH (build it with 'go build .' first)"
 		exit 1
 	}
+}
+
+if (-not $Region) {
+	Write-Host "usage: $ScriptName <region> [vpnproxy args...]  (run from an elevated prompt)"
+	Write-Host "Available regions:"
+	& $VpnproxyBin list -config-dir $ScriptDir
+	exit 1
 }
 
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())

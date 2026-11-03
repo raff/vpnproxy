@@ -34,13 +34,15 @@ if [[ -z "$vpnproxy_bin" ]]; then
 	exit 1
 fi
 
-if [[ "$(id -u)" -ne 0 ]]; then
-	echo "$script_name: must run as root (vpnproxy needs it too); try sudo" >&2
+if [[ $# -lt 1 ]]; then
+	echo "usage: sudo $script_name <region> [vpnproxy args...]" >&2
+	echo "Available regions:" >&2
+	"$vpnproxy_bin" list >&2
 	exit 1
 fi
 
-if [[ $# -lt 1 ]]; then
-	echo "usage: sudo $script_name <region> [vpnproxy args...]" >&2
+if [[ "$(id -u)" -ne 0 ]]; then
+	echo "$script_name: must run as root (vpnproxy needs it too); try sudo" >&2
 	exit 1
 fi
 

@@ -50,9 +50,12 @@ func run() error {
 	if len(os.Args) > 1 && os.Args[1] == "fetch" {
 		return runFetch(os.Args[2:])
 	}
+	if len(os.Args) > 1 && os.Args[1] == "list" {
+		return runList(os.Args[2:], os.Stdout)
+	}
 
 	portsFlag := flag.String("ports", "80,443", "comma-separated list of ports to relay 1:1, local to target")
-	configDir := flag.String("config-dir", "", "directory containing <region>.conf (default: ./ then OS user config directory + vpnproxy/wireguard/)")
+	configDir := flag.String("config-dir", "", configDirUsage())
 	listenAddr := flag.String("listen", "127.0.0.1", "local address to listen on")
 	dnsTimeout := flag.Duration("dns-timeout", defaultDNSTimeout, "wait for the first DNS attempt through the tunnel; retries wait 2x and 3x as long")
 	dnsMinTTL := flag.Duration("dns-min-ttl", defaultMinTTL, "cache resolved addresses at least this long, even if their DNS TTL is shorter")
@@ -61,7 +64,8 @@ func run() error {
 	flag.StringVar(&bindIface, "bind-iface", "", "macOS only: send WireGuard's UDP out of this interface (e.g. en0) instead of the default route, bypassing a full-tunnel VPN like GlobalProtect")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [flags] <region> [target]\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "       %s fetch [flags] <kv-path>   (download configs from Vault; see fetch -h)\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "       %s fetch [flags] <kv-path>   (download configs from Vault; see fetch -h)\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "       %s list [flags]              (list available regions; see list -h)\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "region names a <region>.conf WireGuard config. Per connection, the\n")
 		fmt.Fprintf(os.Stderr, "destination hostname is sniffed from SNI (TLS) or the Host header\n")
 		fmt.Fprintf(os.Stderr, "(plain HTTP) and resolved through the tunnel's own DNS. target is only\n")

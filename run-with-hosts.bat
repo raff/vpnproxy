@@ -8,8 +8,7 @@ rem at all (it would just open in a text editor instead).
 setlocal
 
 if "%~1"=="" (
-	echo usage: %~nx0 ^<region^> [vpnproxy args...]
-	echo   e.g.: %~nx0 FR
+	powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-with-hosts.ps1"
 	pause
 	exit /b 1
 )
