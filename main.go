@@ -52,7 +52,7 @@ func run() error {
 	}
 
 	portsFlag := flag.String("ports", "80,443", "comma-separated list of ports to relay 1:1, local to target")
-	configDir := flag.String("config-dir", "", "directory containing <region>.conf (default: ./ then ~/.config/vpnproxy/wireguard/)")
+	configDir := flag.String("config-dir", "", "directory containing <region>.conf (default: ./ then OS user config directory + vpnproxy/wireguard/)")
 	listenAddr := flag.String("listen", "127.0.0.1", "local address to listen on")
 	dnsTimeout := flag.Duration("dns-timeout", defaultDNSTimeout, "wait for the first DNS attempt through the tunnel; retries wait 2x and 3x as long")
 	dnsMinTTL := flag.Duration("dns-min-ttl", defaultMinTTL, "cache resolved addresses at least this long, even if their DNS TTL is shorter")

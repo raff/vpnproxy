@@ -39,7 +39,7 @@ func runFetch(args []string) error {
 	fs := flag.NewFlagSet("fetch", flag.ContinueOnError)
 	addr := fs.String("addr", os.Getenv("VAULT_ADDR"), "Vault address ($VAULT_ADDR)")
 	namespace := fs.String("namespace", os.Getenv("VAULT_NAMESPACE"), "Vault namespace ($VAULT_NAMESPACE)")
-	dir := fs.String("dir", "", "directory to write <region>.conf files to (default ~/.config/vpnproxy/wireguard/)")
+	dir := fs.String("dir", "", "directory to write <region>.conf files to (default: OS user config directory + vpnproxy/wireguard/)")
 	oidcMount := fs.String("oidc-mount", "oidc", "mount path of the OIDC auth method")
 	oidcRole := fs.String("oidc-role", "", "OIDC role (default: the auth method's default role)")
 	oidcPort := fs.Int("oidc-port", 8250, "local port for the OIDC callback; http://localhost:<port>/oidc/callback must be an allowed redirect URI of the role")
@@ -65,11 +65,11 @@ func runFetch(args []string) error {
 	}
 	outDir := *dir
 	if outDir == "" {
-		home, err := os.UserHomeDir()
+		base, err := os.UserConfigDir()
 		if err != nil {
 			return err
 		}
-		outDir = filepath.Join(home, ".config", "vpnproxy", "wireguard")
+		outDir = filepath.Join(base, "vpnproxy", "wireguard")
 	}
 
 	c := &vaultClient{

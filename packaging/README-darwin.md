@@ -9,7 +9,7 @@ tunnel's exit is.
 
 1. Get a WireGuard config for the region you want (see below), and name it
    after that region, e.g. `FR.conf`. Put it in this same folder, next to
-   `vpnproxy` (or in `~/.config/vpnproxy/wireguard/`).
+   `vpnproxy` (or in `~/Library/Application Support/vpnproxy/wireguard/`).
 
 2. Run, as root — raising a real WireGuard interface requires it:
 
@@ -71,7 +71,7 @@ manual configuration editing is needed.
    to download its WireGuard configuration.
 4. Rename the downloaded file for your region, e.g. `BR.conf`, and put it
    in the folder you run `vpnproxy` from or
-   `~/.config/vpnproxy/wireguard/`. Keep its contents unchanged.
+   `~/Library/Application Support/vpnproxy/wireguard/`. Keep its contents unchanged.
 
 Treat the downloaded file like a password: it contains your private key.
 

@@ -69,7 +69,7 @@ manual configuration editing is needed.
    servers), then click the **Wireguard** link under Available protocols
    to download its WireGuard configuration.
 4. Rename the downloaded file for your region, e.g. `BR.conf`, and put it
-   in the current directory or `~/.config/vpnproxy/wireguard/`. Keep its
+   in the current directory or the [default config directory](#flags). Keep its
    contents unchanged.
 
 Treat the downloaded file like a password: it contains your private key.
@@ -157,7 +157,7 @@ vpnproxy fetch <mount>/vpnproxy
 ```
 
 This writes `<region>.conf` (mode 0600) for every field into
-`~/.config/vpnproxy/wireguard/` (override with `-dir`), replacing existing
+the [default config directory](#flags) (override with `-dir`), replacing existing
 files. A stale `./<region>.conf` in the current directory still takes
 precedence when running `vpnproxy`. KV v1 and v2 mounts both work.
 
@@ -249,7 +249,7 @@ usage: vpnproxy [flags] <region> [target]
        vpnproxy fetch [flags] <kv-path>   (download configs from Vault; see fetch -h)
 
   -config-dir string
-        directory containing <region>.conf (default: ./ then ~/.config/vpnproxy/wireguard/)
+        directory containing <region>.conf (default: ./ then OS user config directory + vpnproxy/wireguard/)
   -listen string
         local address to listen on (default "127.0.0.1")
   -ports string
@@ -257,7 +257,19 @@ usage: vpnproxy [flags] <region> [target]
 ```
 
 `<region>.conf` is looked up in the current directory first, then
-`~/.config/vpnproxy/wireguard/`, unless `-config-dir` is set.
+the OS user config directory returned by Go's `os.UserConfigDir()`, with
+`vpnproxy/wireguard` appended, unless `-config-dir` is set:
+
+| OS | Default config directory |
+|---|---|
+| macOS | `~/Library/Application Support/vpnproxy/wireguard/` |
+| Windows | `%APPDATA%\vpnproxy\wireguard\` |
+| Unix | `$XDG_CONFIG_HOME/vpnproxy/wireguard/`, or `~/.config/vpnproxy/wireguard/` if unset |
+
+Existing files in the old `~/.config/vpnproxy/wireguard/` location on macOS
+or `%USERPROFILE%\.config\vpnproxy\wireguard\` on Windows are not migrated
+automatically. Move them to the new directory or use `-config-dir` to keep
+using the old location.
 
 ### Reading the logs
 

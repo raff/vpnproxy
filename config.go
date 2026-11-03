@@ -11,7 +11,7 @@ import (
 // If configDir is set, only "<configDir>/<region>.conf" is considered.
 // Otherwise the search order is "./<region>.conf" (matching how the .conf
 // is downloaded and used with wg-quick) then
-// "~/.config/vpnproxy/wireguard/<region>.conf".
+// os.UserConfigDir()/vpnproxy/wireguard/<region>.conf.
 func findConfig(region, configDir string) (string, error) {
 	name := region + ".conf"
 
@@ -24,8 +24,8 @@ func findConfig(region, configDir string) (string, error) {
 	}
 
 	candidates := []string{filepath.Join(".", name)}
-	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".config", "vpnproxy", "wireguard", name))
+	if dir, err := os.UserConfigDir(); err == nil {
+		candidates = append(candidates, filepath.Join(dir, "vpnproxy", "wireguard", name))
 	}
 
 	for _, p := range candidates {
